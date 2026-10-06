@@ -33,8 +33,8 @@ interface PaymentModalProps {
 interface PaymentLineState {
   id: string;
   method: PaymentMethod;
-  amount: number;
-  cashReceived: number;
+  amount: number | string;
+  cashReceived: number | string;
   change: number;
   referenceNote: string;
 }
@@ -94,7 +94,11 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
   if (!isOpen || !invoice) return null;
 
-  const totalPaid = paymentLines.reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  const totalPaid = paymentLines.reduce((sum, line) => {
+    const val = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+    return sum + val;
+  }, 0);
+
   const remaining = Math.round((invoice.total - totalPaid) * 100) / 100;
   const isExactMatch = Math.abs(remaining) < 0.001;
 
@@ -113,29 +117,68 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         }
       : null);
 
+  // Add an additional payment method (Split payment)
   const handleAddLine = () => {
-    const nextAmount = remaining > 0 ? remaining : 0;
-    const newLine: PaymentLineState = {
-      id: Date.now().toString(),
-      method: 'CARD',
-      amount: nextAmount,
-      cashReceived: nextAmount,
-      change: 0,
-      referenceNote: '',
-    };
-    setPaymentLines([...paymentLines, newLine]);
+    if (paymentLines.length === 1) {
+      // Intelligently split 50/50 on first split
+      const half = Math.round((invoice.total / 2) * 100) / 100;
+      const otherHalf = Math.round((invoice.total - half) * 100) / 100;
+
+      const firstLine = {
+        ...paymentLines[0],
+        amount: half,
+        cashReceived: half,
+        change: 0,
+      };
+
+      const secondLine: PaymentLineState = {
+        id: Date.now().toString(),
+        method: 'CARD',
+        amount: otherHalf,
+        cashReceived: otherHalf,
+        change: 0,
+        referenceNote: '',
+      };
+
+      setPaymentLines([firstLine, secondLine]);
+    } else {
+      const nextAmount = remaining > 0 ? remaining : 0;
+      const newLine: PaymentLineState = {
+        id: Date.now().toString(),
+        method: 'CARD',
+        amount: nextAmount,
+        cashReceived: nextAmount,
+        change: 0,
+        referenceNote: '',
+      };
+      setPaymentLines([...paymentLines, newLine]);
+    }
   };
 
   const handleRemoveLine = (id: string) => {
     if (paymentLines.length <= 1) return;
-    setPaymentLines(paymentLines.filter((l) => l.id !== id));
+    const remainingLines = paymentLines.filter((l) => l.id !== id);
+    if (remainingLines.length === 1) {
+      // Reset single line back to full invoice total
+      setPaymentLines([
+        {
+          ...remainingLines[0],
+          amount: invoice.total,
+          cashReceived: invoice.total,
+          change: 0,
+        },
+      ]);
+    } else {
+      setPaymentLines(remainingLines);
+    }
   };
 
   const handleLineMethodChange = (id: string, method: PaymentMethod) => {
     setPaymentLines(
       paymentLines.map((line) => {
         if (line.id === id) {
-          const cashReceived = method === 'CASH' ? line.amount + tipAmount : 0;
+          const numAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+          const cashReceived = method === 'CASH' ? numAmt + tipAmount : 0;
           return {
             ...line,
             method,
@@ -148,33 +191,63 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     );
   };
 
-  const handleLineAmountChange = (id: string, newAmount: number) => {
-    setPaymentLines(
-      paymentLines.map((line) => {
+  const handleLineAmountChange = (id: string, rawVal: string) => {
+    const numVal = parseFloat(rawVal) || 0;
+
+    setPaymentLines((prevLines) => {
+      // If there are exactly 2 lines and we are editing one of them, auto-balance the other line
+      if (prevLines.length === 2) {
+        const otherLineIndex = prevLines.findIndex((l) => l.id !== id);
+        const thisLineIndex = prevLines.findIndex((l) => l.id === id);
+        if (otherLineIndex !== -1 && thisLineIndex !== -1) {
+          const balancedOtherAmount = Math.max(0, Math.round((invoice.total - numVal) * 100) / 100);
+          
+          return prevLines.map((line, idx) => {
+            if (idx === thisLineIndex) {
+              return {
+                ...line,
+                amount: rawVal,
+                cashReceived: line.method === 'CASH' ? (rawVal === '' ? '' : numVal) : line.cashReceived,
+                change: 0,
+              };
+            } else {
+              return {
+                ...line,
+                amount: balancedOtherAmount,
+                cashReceived: line.method === 'CASH' ? balancedOtherAmount : line.cashReceived,
+                change: 0,
+              };
+            }
+          });
+        }
+      }
+
+      // Default update for single or multi > 2 lines
+      return prevLines.map((line) => {
         if (line.id === id) {
-          const cashReceived = line.method === 'CASH' && line.cashReceived < newAmount ? newAmount : line.cashReceived;
-          const change = line.method === 'CASH' ? Math.max(0, cashReceived - (newAmount + tipAmount)) : 0;
           return {
             ...line,
-            amount: newAmount,
-            cashReceived,
-            change,
+            amount: rawVal,
+            cashReceived: line.method === 'CASH' ? (rawVal === '' ? '' : numVal) : line.cashReceived,
+            change: 0,
           };
         }
         return line;
-      }),
-    );
+      });
+    });
   };
 
-  const handleCashReceivedChange = (id: string, received: number) => {
+  const handleCashReceivedChange = (id: string, rawVal: string) => {
+    const numReceived = parseFloat(rawVal) || 0;
     setPaymentLines(
       paymentLines.map((line) => {
         if (line.id === id) {
-          const effectiveNeeded = line.amount + tipAmount;
-          const change = Math.max(0, received - effectiveNeeded);
+          const lineAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+          const effectiveNeeded = lineAmt + tipAmount;
+          const change = Math.max(0, numReceived - effectiveNeeded);
           return {
             ...line,
-            cashReceived: received,
+            cashReceived: rawVal,
             change,
           };
         }
@@ -186,7 +259,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const handleApplyExcessAsTip = (lineId: string) => {
     const line = paymentLines.find((l) => l.id === lineId);
     if (!line) return;
-    const excess = Math.max(0, line.cashReceived - line.amount);
+    const numReceived = typeof line.cashReceived === 'number' ? line.cashReceived : parseFloat(line.cashReceived) || 0;
+    const numAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+    const excess = Math.max(0, numReceived - numAmt);
     if (excess > 0) {
       setTipAmount(excess);
       setPaymentLines(
@@ -220,25 +295,33 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 
     // Validate each line
     for (const line of paymentLines) {
-      if (line.amount <= 0) {
+      const lineAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+      const numReceived = typeof line.cashReceived === 'number' ? line.cashReceived : parseFloat(line.cashReceived) || 0;
+
+      if (lineAmt <= 0) {
         setErrorMessage('يجب أن تكون مبالغ طرق الدفع أكبر من الصفر.');
         return;
       }
-      if (line.method === 'CASH' && line.cashReceived < line.amount + tipAmount) {
-        setErrorMessage('المبلغ المستلم نقداً لا يمكن أن يكون أقل من إجمالي الفاتورة مع التبس.');
+      if (line.method === 'CASH' && numReceived < lineAmt) {
+        setErrorMessage('المبلغ المستلم نقداً لا يمكن أن يكون أقل من المبلغ المطلوب سداده كاش.');
         return;
       }
     }
 
     setIsProcessing(true);
     try {
-      const paymentsPayload: LocalPaymentInput[] = paymentLines.map((line) => ({
-        payment_method: line.method,
-        amount: line.amount,
-        cash_received_amount: line.method === 'CASH' ? line.cashReceived : undefined,
-        change_amount: line.method === 'CASH' ? line.change : undefined,
-        reference_note: line.referenceNote.trim() || undefined,
-      }));
+      const paymentsPayload: LocalPaymentInput[] = paymentLines.map((line) => {
+        const lineAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+        const numReceived = typeof line.cashReceived === 'number' ? line.cashReceived : parseFloat(line.cashReceived) || 0;
+
+        return {
+          payment_method: line.method,
+          amount: lineAmt,
+          cash_received_amount: line.method === 'CASH' ? numReceived : undefined,
+          change_amount: line.method === 'CASH' ? line.change : undefined,
+          reference_note: line.referenceNote.trim() || undefined,
+        };
+      });
 
       const tipDetails =
         tipAmount > 0
@@ -429,8 +512,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             </div>
 
             {paymentLines.map((line) => {
-              const effectiveRequiredCash = line.amount + tipAmount;
-              const excess = line.method === 'CASH' ? line.cashReceived - line.amount : 0;
+              const lineAmt = typeof line.amount === 'number' ? line.amount : parseFloat(line.amount) || 0;
+              const numReceived = typeof line.cashReceived === 'number' ? line.cashReceived : parseFloat(line.cashReceived) || 0;
+              const excess = line.method === 'CASH' ? numReceived - lineAmt : 0;
 
               return (
                 <div
@@ -482,11 +566,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                       <input
                         type="number"
                         step="0.5"
-                        min="0.1"
+                        min="0"
                         value={line.amount}
-                        onChange={(e) =>
-                          handleLineAmountChange(line.id, parseFloat(e.target.value) || 0)
-                        }
+                        onChange={(e) => handleLineAmountChange(line.id, e.target.value)}
                         className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-sm font-mono font-black text-white focus:outline-none focus:border-amber-500 transition-colors"
                       />
                     </div>
@@ -500,24 +582,21 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
                           <input
                             type="number"
                             step="1"
-                            min={line.amount}
                             value={line.cashReceived}
-                            onChange={(e) =>
-                              handleCashReceivedChange(line.id, parseFloat(e.target.value) || 0)
-                            }
+                            onChange={(e) => handleCashReceivedChange(line.id, e.target.value)}
                             className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-2 text-sm font-mono font-black text-emerald-400 focus:outline-none focus:border-emerald-500 transition-colors"
                           />
                         </div>
 
-                        {/* Quick One-Click Button if excess paid */}
-                        {excess > 0 && tipAmount === 0 && (
+                        {/* Quick One-Click Button ONLY if invoice is fully balanced and client genuinely paid extra cash */}
+                        {isExactMatch && excess > 0 && tipAmount === 0 && (
                           <button
                             type="button"
                             onClick={() => handleApplyExcessAsTip(line.id)}
                             className="w-full py-1.5 px-2 bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 text-amber-300 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 transition-all cursor-pointer"
                           >
                             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                            <span>تسجيل الفارق ({excess.toFixed(2)} ج.م) كإكرامية للحلاق</span>
+                            <span>تسجيل الفارق الزائد ({excess.toFixed(2)} ج.م) كإكرامية للحلاق</span>
                           </button>
                         )}
 
