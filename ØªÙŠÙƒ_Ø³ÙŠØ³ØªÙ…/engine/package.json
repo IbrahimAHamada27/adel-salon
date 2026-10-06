@@ -1,0 +1,25 @@
+{
+  "name": "tech-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace=apps/api run start:dev",
+    "dev:web": "npm --workspace=apps/admin-web run dev",
+    "dev:cashier": "npm --workspace=apps/cashier-desktop run dev",
+    "dev": "npm run dev:api",
+    "build:api": "npm --workspace=apps/api run build",
+    "build:web": "npm --workspace=apps/admin-web run build",
+    "build:cashier": "npm --workspace=apps/cashier-desktop run build",
+    "build": "npm run build:api && npm run build:web && npm run build:cashier",
+    "test:api": "npm --workspace=apps/api run test",
+    "test:cashier": "npm --workspace=apps/cashier-desktop run test",
+    "test": "npm run test:api && npm run test:cashier",
+    "lint": "npm --workspace=apps/api run lint && npm --workspace=apps/admin-web run lint && npm --workspace=apps/cashier-desktop run lint"
+  },
+  "optionalDependencies": {
+    "@next/swc-win32-x64-msvc": "^16.3.8"
+  }
+}
