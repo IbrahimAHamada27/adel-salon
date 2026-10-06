@@ -11,7 +11,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(DatabaseService.name);
   private db!: DatabaseSync;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) { }
 
   onModuleInit() {
     const dbPath = this.configService.get<string>('DATABASE_FILE', './data/tech_server.sqlite');
@@ -373,25 +373,25 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     // 15. Idempotent Sync & Outbox Enhancements
     try {
       this.db.exec(`ALTER TABLE invoices ADD COLUMN operation_id TEXT;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`ALTER TABLE invoices ADD COLUMN sync_id TEXT;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_invoices_op_id ON invoices(operation_id) WHERE operation_id IS NOT NULL;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`ALTER TABLE shifts ADD COLUMN operation_id TEXT;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_shifts_op_id ON shifts(operation_id) WHERE operation_id IS NOT NULL;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`ALTER TABLE expenses ADD COLUMN operation_id TEXT;`);
-    } catch {}
+    } catch { }
     try {
       this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_expenses_op_id ON expenses(operation_id) WHERE operation_id IS NOT NULL;`);
-    } catch {}
+    } catch { }
 
     this.logger.log('Database migrations completed successfully.');
   }
